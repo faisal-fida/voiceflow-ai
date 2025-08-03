@@ -1,0 +1,34 @@
+# Start from the nvidia/cuda image with Ubuntu 20.04
+FROM nvidia/cuda:11.8.0-base-ubuntu20.04
+
+# Install Python 3.11, pip, and Git
+RUN apt-get update && \
+    apt-get install -y software-properties-common curl && \
+    add-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y libcudnn8=8.8.0.121-1+cuda11.8 && \
+    apt-get update && \
+    apt-get install -y python3.11 python3.11-dev python3.11-venv git
+
+# Ensure pip is installed for Python 3.11
+RUN python3.11 -m ensurepip --upgrade
+
+# Set up SSH for Git
+#RUN mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+# Copy your SSH private key into the Docker image
+#COPY github /root/.ssh/github
+#RUN chmod 600 /root/.ssh/github
+
+# Create an application-specific directory and set it as the working directory
+WORKDIR /voiceflow-ai
+
+# Copy your local repository into the Docker image
+COPY . .
+
+# Install the Python dependencies
+RUN python3.11 -m pip install -r requirements.txt
+
+# Run your FastAPI applications using Uvicorn, and pull the latest changes from the repository
+#CMD ["sh", "-c", "eval $(ssh-agent -s) && ssh-add /root/.ssh/github && git pull && python3.11 -m pip uninstall -y -r uninstall.txt && python3.11 -m pip install -r requirements.txt && uvicorn voiceflow_ai.classification_app:app --host 0.0.0.0 --port 9000"]
+CMD ["uvicorn"  , "voiceflow_ai.classification_app:app" , "--host", "0.0.0.0", "--port", "9000"]

@@ -1,0 +1,13 @@
+transformers[torch]
+fastapi
+aiofiles
+faster-whisper
+python-multipart
+requests
+starlette
+uvicorn
+httpx
+torch
+torchaudio
+
+--extra-index-url https://download.pytorch.org/whl/cu118
