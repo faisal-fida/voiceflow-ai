@@ -298,21 +298,9 @@ if call_type == "new_type":
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
 ## 🙏 Acknowledgments
 
 - **OpenAI Whisper** for speech recognition capabilities
 - **Hugging Face Transformers** for BERT-based classification
 - **FastAPI** for the high-performance web framework
 - **Docker** for containerization and deployment
-
-## 🆘 Support
-
-For support, email [your-email] or create an issue in the repository.
-
----
-
-**VoiceFlow AI** - Transforming voice conversations into actionable insights for the insurance industry.
