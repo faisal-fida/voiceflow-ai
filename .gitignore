@@ -1,2 +1,16 @@
 /voiceflow_ai/logs/*.*
 /voiceflow_ai/logs/archive/*.*
+# Secrets and keys
+.env
+.env.*
+keys/
+*.pem
+*service-account*.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Model files
+voiceflow_ai/ai/

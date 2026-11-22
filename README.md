@@ -1,306 +1,82 @@
-# VoiceFlow AI
+# voiceflow-ai
 
-🎙️ **AI-Powered Voice Analytics Platform for Insurance Industry**
+Two FastAPI services for call-center audio: speech-to-text with Whisper, and classification of the transcript into call outcome labels, tuned for insurance calls (Medicare, ACA, Final Expense).
 
-VoiceFlow AI is a production-ready FastAPI microservices platform that provides real-time speech-to-text transcription and intelligent text classification, specifically optimized for insurance call center analytics.
+## Features
 
-## 🌟 Key Features
+- Transcription service (`POST /transcribe/`): receives an audio file, transcribes it with faster-whisper (`small.en`, GPU float16 or CPU int8), then labels the text. Uses context prompts that depend on call type and turn number.
+- Labelling pipeline: cleans the transcript (contractions, noise phrases), tries exact and substring phrase lists first, and only then calls the classification service.
+- Classification service (`POST /classify/`): runs fine-tuned DistilBERT sequence classifiers, chosen by `call_type` (`medicare`, `aca`, `fe`) and `model_type`.
+- `GET /health` on both services and `POST /shutdown` for a graceful drain of running requests.
+- JSON logging with rotating log files, and Docker images plus a Docker Swarm stack file.
 
-### 🎯 **Dual-Service Architecture**
-- **Transcription Service**: High-performance speech-to-text using OpenAI Whisper
-- **Classification Service**: Intent/outcome classification using specialized DistilBERT models
+## Tech stack
 
-### 🏥 **Industry-Specialized Models**
-- **Medicare**: Optimized for Medicare-related calls and terminology
-- **ACA (Affordable Care Act)**: Healthcare marketplace conversations  
-- **Final Expense**: Life insurance and burial coverage discussions
+Python 3.11, FastAPI, Uvicorn, faster-whisper, transformers and PyTorch (CUDA 11.8 images), Docker / Docker Swarm.
 
-### 🧠 **Context-Aware Processing**
-- Dynamic prompts based on call type and conversation turn
-- Specialized models for different conversation stages
-- Industry-specific vocabulary and terminology handling
+## Project structure
 
-### ⚡ **Production-Ready Features**
-- GPU acceleration with automatic CPU fallback
-- Docker Swarm deployment with health checks
-- Graceful shutdown and resource management
-- Comprehensive logging and monitoring
-- Async processing for high throughput
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Docker & Docker Compose
-- NVIDIA GPU (optional, will fallback to CPU)
-- Python 3.8+ (for development)
-
-### 🐳 Docker Deployment
-
-1. **Clone the repository**
-```bash
-git clone <repository-url>
-cd voiceflow-ai
+```
+voiceflow_ai/
+  transcription_app.py, classification_app.py   the two FastAPI apps
+  routers/        /transcribe/ and /classify/ endpoints
+  services/       Whisper and DistilBERT wrappers
+  core/           config (model paths, phrase lists), logger, transcript processing
+Dockerfile_transcription, Dockerfile_classification
+docker-stack.yml
+requirements.txt
 ```
 
-2. **Build the services**
+## Setup and run
+
+You must supply the trained models, which are not in this repository:
+
+1. In `voiceflow_ai/core/config.py`, set the model locations (empty strings in the repo): `DISTIL_MODEL`, `MEDICARE_MODEL_B`, `MEDICARE_MODEL_11`, `MEDICARE_MODEL_12`, `ACA_MODEL`, `ACA_MODEL_B`, `FE_MODEL_B` (paths or Hugging Face model IDs for DistilBERT classifiers).
+2. Put a short test recording at `voiceflow_ai/core/whisper_test.wav`. The transcription service runs it at start-up for its health check.
+
+Run locally:
+
 ```bash
-# Build transcription service
+pip install -r requirements.txt
+uvicorn voiceflow_ai.classification_app:app --port 9000
+uvicorn voiceflow_ai.transcription_app:app --port 8000   # in a second terminal
+```
+
+The transcription processor calls the classifier at `http://voiceflow_classification:9000`, so for local runs add that hostname to `/etc/hosts` pointing at 127.0.0.1, or change the URL in `core/transcription_processor.py`.
+
+Docker Swarm (NVIDIA GPU host):
+
+```bash
 docker build -f Dockerfile_transcription -t api-transcription:latest .
-
-# Build classification service  
 docker build -f Dockerfile_classification -t api-classification:latest .
-```
-
-3. **Deploy with Docker Swarm**
-```bash
-# Initialize swarm (if not already done)
 docker swarm init
-
-# Create external network
 docker network create --driver overlay voiceflow-net
-
-# Deploy the stack
 docker stack deploy -c docker-stack.yml voiceflow
 ```
 
-### 🔧 Development Setup
+Environment variables: the code reads none. `docker-stack.yml` sets `NVIDIA_VISIBLE_DEVICES=all`. No Google credentials are used by the code. If you add Google Cloud features, load the service account from the standard `GOOGLE_APPLICATION_CREDENTIALS` path (a file outside the repo). Key files are git-ignored.
 
-1. **Install dependencies**
+## Usage example
+
 ```bash
-pip install -r requirements.txt
+curl -X POST http://localhost:8000/transcribe/ \
+  -F uuid=abc-123 -F connection_id=call-1 -F turn_number=1 \
+  -F model_type=A -F call_type=medicare -F file=@call.wav
+
+curl -X POST http://localhost:9000/classify/ \
+  -F transcribed_text="yes I have medicare" -F serial_number=call-1 \
+  -F model_type=A -F call_type=medicare
 ```
 
-2. **Configure models** (Update `voiceflow_ai/core/config.py`)
-```python
-# Set your model paths
-DISTIL_MODEL = "path/to/your/classification/model"
-MEDICARE_MODEL_B = "path/to/medicare/model"
-ACA_MODEL = "path/to/aca/model"
-# ... other model configurations
-```
+The transcription response contains `transcription`, `label`, `confidence`, timings and `model_used`.
 
-3. **Run services locally**
-```bash
-# Transcription service (port 8000)
-uvicorn voiceflow_ai.transcription_app:app --host 0.0.0.0 --port 8000
+## Limitations and status
 
-# Classification service (port 9000)
-uvicorn voiceflow_ai.classification_app:app --host 0.0.0.0 --port 9000
-```
+- Not runnable out of the box: models, the test audio and local-name settings must be provided (see Setup). Not tested here, since it needs the models and a GPU for realistic use.
+- `docker-stack.yml` runs 9 transcription replicas and expects the service name `voiceflow_classification`; adjust for your hardware.
+- The label codes (for example `N`, `AP`, `HP`) are specific to the original project and are not documented in the code.
+- A Google service account key that was committed has been removed from the working tree. It remains in git history, so treat it as compromised and revoke it.
 
-## 📡 API Endpoints
+## License
 
-### Transcription Service (Port 8000)
-
-#### `POST /transcribe/`
-Convert audio to text with intelligent classification
-
-**Request:**
-```bash
-curl -X POST "http://localhost:8000/transcribe/" \
-  -F "file=@audio.wav" \
-  -F "uuid=unique-call-id" \
-  -F "connection_id=conn-123" \
-  -F "turn_number=1" \
-  -F "model_type=A" \
-  -F "call_type=medicare"
-```
-
-**Response:**
-```json
-{
-  "uuid": "unique-call-id",
-  "transcription": "Hello, I'm calling about Medicare benefits",
-  "label": "P",
-  "confidence": 0.89,
-  "transcription_time": 2.1,
-  "classification_time": 0.3,
-  "processed_transcribed_text": "hello i'm calling about medicare benefits",
-  "model_used": "mc_10.3"
-}
-```
-
-### Classification Service (Port 9000)
-
-#### `POST /classify/`
-Classify transcribed text for call analysis
-
-**Request:**
-```bash
-curl -X POST "http://localhost:9000/classify/" \
-  -F "transcribed_text=I'm interested in Medicare plans" \
-  -F "serial_number=conn-123" \
-  -F "model_type=A" \
-  -F "call_type=medicare"
-```
-
-**Response:**
-```json
-{
-  "label": "P",
-  "confidence": 0.92,
-  "model_used": "mc_10.3"
-}
-```
-
-### Health Checks
-- `GET /health` - Service health status
-- `POST /shutdown` - Graceful shutdown
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────┐    ┌─────────────────────┐
-│   Client/Frontend   │    │   Load Balancer     │
-└──────────┬──────────┘    └──────────┬──────────┘
-           │                          │
-           └──────────────────────────┘
-                      │
-         ┌────────────┴────────────┐
-         │                         │
-┌────────▼────────┐    ┌───────────▼──────────┐
-│ Transcription   │    │  Classification      │
-│ Service         │    │  Service             │
-│ (Port 8000)     │    │  (Port 9000)         │
-│                 │    │                      │
-│ ┌─────────────┐ │    │ ┌──────────────────┐ │
-│ │   Whisper   │ │    │ │   DistilBERT     │ │
-│ │   Model     │ │    │ │   Models         │ │
-│ └─────────────┘ │    │ │  - Medicare      │ │
-└─────────────────┘    │ │  - ACA           │ │
-                       │ │  - Final Expense │ │
-                       │ └──────────────────┘ │  
-                       └──────────────────────┘
-```
-
-## 🔧 Configuration
-
-Key configuration options in `voiceflow_ai/core/config.py`:
-
-```python
-class Settings:
-    # Model paths
-    DISTIL_MODEL = "path/to/base/classification/model"
-    MEDICARE_MODEL_B = "path/to/medicare/model"
-    ACA_MODEL = "path/to/aca/model"
-    FE_MODEL_B = "path/to/final-expense/model"
-    
-    # Whisper configuration
-    WHISPER_MODEL = "openai/whisper-tiny.en"
-    
-    # Processing type
-    TYPE = True  # True for multi-class, False for 3-class classification
-```
-
-## 📊 Call Classification Labels
-
-### Medicare Calls
-- **P**: Positive/Interested
-- **N**: Negative/Not Interested  
-- **U**: Unclear/Uncertain
-- **DNC**: Do Not Call
-- **CB**: Call Back
-- **AP**: Age-related responses
-- And 70+ specialized labels...
-
-### ACA Calls
-- **ELI**: Eligible
-- **SUB**: Subsidy-related
-- **ICE**: Insurance coverage existing
-- **ACA**: ACA-specific responses
-- And 45+ specialized labels...
-
-### Final Expense Calls
-- **BENE**: Beneficiary discussions
-- **COST**: Cost-related inquiries
-- **SCAM**: Scam detection
-- And 45+ specialized labels...
-
-## 🚀 Performance & Scaling
-
-### Resource Requirements
-- **GPU**: NVIDIA GPU with CUDA support (recommended)
-- **RAM**: 8GB+ (16GB+ for production)
-- **CPU**: 4+ cores
-- **Storage**: 10GB+ for models
-
-### Scaling Configuration
-```yaml
-# docker-stack.yml
-services:
-  transcription:
-    deploy:
-      replicas: 9  # Scale based on load
-  classification:
-    deploy:
-      replicas: 1  # Lighter classification service
-```
-
-## 🔒 Security & Compliance
-
-- Google Service Account integration for cloud services
-- Secure file handling with automatic cleanup
-- Request tracking with unique connection IDs
-- Health monitoring and graceful shutdowns
-
-## 📈 Monitoring & Logging
-
-Comprehensive logging with:
-- Request/response tracking
-- Performance metrics (processing times)
-- Error handling and debugging
-- Serial number tracking for call tracing
-
-## 🛠️ Development
-
-### Project Structure
-```
-voiceflow_ai/
-├── core/                 # Core utilities and config
-│   ├── config.py        # Configuration settings
-│   ├── dependencies.py  # Dependency injection  
-│   ├── logger.py        # Logging configuration
-│   └── transcription_processor.py
-├── routers/             # API route handlers
-│   ├── transcription_router.py
-│   └── classification_router.py  
-├── services/            # Business logic services
-│   ├── transcription_service.py
-│   └── classification_service.py
-├── classification_app.py # Classification FastAPI app
-└── transcription_app.py  # Transcription FastAPI app
-```
-
-### Adding New Models
-
-1. **Update configuration** in `config.py`
-```python
-NEW_MODEL_PATH = "path/to/new/model"
-```
-
-2. **Initialize in service** 
-```python
-self.new_model = AutoModelForSequenceClassification.from_pretrained(NEW_MODEL_PATH)
-```
-
-3. **Add classification logic**
-```python
-if call_type == "new_type":
-    model = self.new_model
-    tokenizer = self.new_tokenizer
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 🙏 Acknowledgments
-
-- **OpenAI Whisper** for speech recognition capabilities
-- **Hugging Face Transformers** for BERT-based classification
-- **FastAPI** for the high-performance web framework
-- **Docker** for containerization and deployment
+MIT, see [LICENSE](LICENSE).
